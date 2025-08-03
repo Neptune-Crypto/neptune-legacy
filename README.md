@@ -40,7 +40,7 @@ The network lives on for owners of UTXOs to exercise
   `cargo install --locked --path .` (needs at least 3 GB of RAM and a few minutes)
 
 > [!IMPORTANT]
-> Any branch except `release` is considered an _unstable development_ branch. Should you choose to use
+> Any branch except tag `release` is considered an _unstable development_ branch. Should you choose to use
 > such a branch, you risk database corruption, loss of funds, crashing user interfaces, _etc_.
 
 ### Windows
@@ -55,14 +55,13 @@ Windows should just work out-of-the-box with cargo build etc.
 - Open PowerShell to run the following commands.
 - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
 - Enter the repository: `cd neptune-core`
-- Checkout the release branch `git checkout release`. (Alternatively, for an *unstable development*
+- Checkout the release tag `git checkout release`. (Alternatively, for an *unstable development*
   branch, skip this step.)
 
 - Run `cargo install --locked --path .`
 
 ## Running & Connecting
 
-- Generate a wallet file: `neptune-cli generate-wallet`
 - Run neptune-core daemon: `neptune-core` with flags
     - `--peers [ip_address:port]` to connect to a given peer, for instance
     `--peers 139.162.193.206:19798`
@@ -71,14 +70,6 @@ Windows should just work out-of-the-box with cargo build etc.
 If you don't have a static IPv4, then try connecting to other nodes with IPv6. It's our experience
 that you will then be able to open and receive connections to other nodes through Nepture Core's
 built-in peer-discovery process.
-
-## Documentation
-
-Documentation uses [https://rust-lang.github.io/mdBook/](mdBook). To run a local copy:
-
-- install mdBook: `cargo install mdbook`
-- enter into the `docs/` directory: `cd docs`
-- run server: `mdbook serve --open`
 
 ## Dashboard
 
@@ -107,110 +98,101 @@ neptune-cli block-height
 If you set up `neptune-core` to listen for RPC requests on a different port from the default (9799),
 then the flag `--port <port>` is your friend.
 
-## Setup for Development (Ubuntu)
-
-- build-essential (for `make`) -- `apt install build-essential`
-- install `vscode`
-- in `vscode` install the plugin `rust-analyzer`
-- in `vscode` activate format-on-save via `File` > `Preferences` > `Settings` then check the box
-  for "Format on Save"
-- install `cpulimit` for nicer, and more quiet integration tests: `apt install cpulimit`
-
-## Branches and Pull Requests
-
-Please see [documentation](https://docs.neptune.cash/contributing/git-workflow.html) of our
-branching methodology and how to submit a pull request.
-
-## Logging
-
-All logging is output to standard out.
-
-The log level can be set through the environment variable `RUST_LOG`. Valid values are: `trace`,
-`debug`, `info`, `warn`, and `error`. The default value is `info`. E.g.: `RUST_LOG=trace cargo run`.
-More complex settings
-are [possible](https://docs.rs/env_logger/latest/env_logger/#enabling-logging).
-
-The default log level is: `RUST_LOG='info,tarpc=warn'`. This prevents logging `info` level from the
-tarpc (RPC) module, which can spam the log. If you wish to see those, just use `RUST_LOG='info'`
-
-To see even more detail, but without tarpc spam: `RUST_LOG='debug,tarpc=warn'`
-
-For development purposes it can sometimes be nice to get a more succinct logging output by piping
-stdout through `sed` with the below command. This will only print the namespace of the logging event
-and the log text. The log output can also be stored to file by piping it to `tee`, like this:
-`cargo run 2>&1 | tee -a integration_test.log`.
-
-```
-sed 's/.*neptune_core:\+\(.*\)/\1/g'
-```
-
-## Running tokio-console
-
-[tokio-console](https://github.com/tokio-rs/console) is a tool for monitoring tokio tasks and
-resources/locks in real-time. Kind of like unix `top`, but for a single application.
-
-tokio-console support is not built into neptune-core by default. It requires building with
-`--features tokio-console`.
-
-To use tokio-console with neptune-core:
-
-1. build and install neptune-core with tokio-console support.
-
-   `cargo install --features tokio-console --locked --path .`
-
-2. install tokio-console executable.
-
-   `cargo install --locked tokio-console`
-   see: [tokio-console installation](https://github.com/tokio-rs/console#running-the-console)
-
-3. run tokio-console in a terminal
-
-4. run neptune-core in a separate terminal, passing the --tokio-console flag.
-
-   `neptune-core --tokio-console [other-arguments]`
-
-## Local Integration Test Strategy
-
-This repository contains unit tests, but async programs are notoriously hard to test. And the unit
-tests usually only cover narrow parts of the code within a single async task. When you are making
-changes to the code, you can run through the following checks
-
-1. `cargo b` to verify that it builds without warnings
-2. `cargo t` to verify that all unit tests work
-3. `run-multiple-instances.sh` to spin up three nodes that are connected through `localhost`.
-   Instance `I0` and `I2` should be mining and all three clients should be converging on the same
-   blocks. You can read the hashes of the blocks in the log output and verify that they all store
-   the same blocks.
-4. Run `make restart` followed by `run-multiple-instances.sh` to verify that the nodes can start
-   from the genesis block, create a database and store subsequent blocks in this database. This test
-   is important to verify that the client software doesn't need an existing database to function.
-5. If you encounter an error in some of the stages later then (2), i.e. an error that wasn't caught
-   by the compiler or the tests, consider if you could add a unit test that **would** have caught
-   this error. If that's not possible consider if you can add a manual test (for example a shell
-   script) where the tests would have been visible. Also consider if you can add anything to this
-   list that would have caught this error (assuming you didn't write a unit test that caught it).
-6. Make a transaction from e.g. `I0` to `I2` and verify that the transaction can successfully be
-   mined and that the balances are updated correctly in each dashboard.
-
-## Crash Procedures
-
-If any cryptographic data ends up in an invalid state, and the note crashes as a result, please copy
-your entire data directory (except `wallet.dat`, `incoming_randomness.dat`, and
-`outgoing_randomness.dat`) and share it publicly. If you're not on `main` net, which hasn't been
-released yet, it should be OK to share `wallet.dat`, which contains your secret key, as well.
-
 ## Restarting Node from the Genesis Block
 
-In order to restart your node from the genesis block, you should delete these folders:
+If you are not already synced to the network, you want to restart your node from genesis. To do
+that, start by delete these folders.
 
-- `<data_directory>/<network>/blocks/`
-- `<data_directory>/<network>/databases/`
+- `<data_directory>/main/blocks/`
+- `<data_directory>/main/databases/`
 
-If you're restarting on a new chain and have no hope of recovering any funds, you should also delete
-these files:
+Note that all data required to retrieve your funds is located in the following files:
 
-- `<data_directory>/<network>/wallet/incoming_randomness.dat`
-- `<data_directory>/<network>/wallet/outgoing_randomness.dat`.
+- `<data_directory>/main/wallet/wallet.dat`
+- `<data_directory>/main/wallet/incoming_randomness.dat`
+- `<data_directory>/main/wallet/outgoing_randomness.dat`.
 
-On Linux, with the standard settings, the `data_directory` is
-`~/.local/share/neptune/`.
+Therefore, the `blocks/` and `databases/` directories can safely be deleted without risking loss of
+funds -- as long as the files in `wallet/` remain.
+
+On Linux, with the standard settings, the `data_directory` is `~/.local/share/neptune/`. On every
+system the data directory is outputted by the node at startup, so you can read it from the log.
+
+## Syncing
+
+If you start the node with the command-line argument `--peers 139.162.193.206:19798`, then you will
+connect to at least one legacy peer. If there are other nodes on the network, your node will
+discover them automatically through peer discovery.
+
+Meanwhile, your node will automatically enter into sync mode if it notices a big discrepancy between
+the block height of its peers and its own block height. When in sync mode, the node will start
+downloading historical blocks until it has caught up with the tip. On legacy, catching up to block
+21310 suffices; anything after that is wasted effort.
+
+While syncing should start and continue automatically, the process is not as robust as it could be.
+If you run into issues while syncing,
+[sync timeouts](https://github.com/Neptune-Crypto/neptune-core/issues/634) or even crashes, it is
+fine to restart the node periodically.
+
+As an alternative to the regular sync mode initial block download, you can also download the blocks
+via torrent and sync from there.
+
+## Torrent and Sync
+
+ - Install your favorite Bittorrent client. (Vuze, Transmission, Bittorrent, etc.).
+ - Download the
+   [torrent file](https://neptune.cash/blog/utxo-redemption/neptune-cash-legacy-blocks20250728.torrent).
+ - Use the Bittorrent client to download the torrent.
+ - Unpack the archive. On linux: `tar -xf neptune-mainnet-blocks-sword-smith-2025-07-28.tar.gz`
+ - This will generate a directory called `home/` which looks empty, but don't be fooled. The blocks
+   are located at `home/thv/.local/share/neptune/main/blocks/`.
+ - Start your Neptune Legacy node with the command-line argument
+   `--bootstrap-from-directory path/to/thv/.local/share/neptune/main/blocks/`.
+
+## Exercising a UTXO Redemption Claim
+
+Note that earlier instructions are [here](https://neptune.cash/blog/utxo-redemption/) and
+[here](https://neptune.cash/learn/utxo-redemption-tutorial/). You might want to cross-reference
+against these resources.
+
+### Pre-requisites
+
+ - A running legacy node synced to block 21310 (or later).
+ - >5 GB of free RAM.
+ - A terminal for using the command-line interface.
+ - The command-line interface, `neptune-cli`.
+
+### Instructions
+
+ 1. Set tip to block 21310: `neptune-cli set-tip ecfae777da1a6b5ad97d3d793cb64b0cb4262ac5e378d2f4e2a5049e731298e058b2000000000000`.
+
+This sets the blockchain-state of the node to block 21310. It will also freeze the node, so that 
+announced blocks and transactions are ignored.
+
+ 2. Produce the UTXO redemption claim: `neptune-cli redeem-utxos`.
+
+Note that the CLI command will return quickly, but the the running node will start producing
+redemption claims. Specifically, redemption claims live in files called somthing like
+`b64b0cb4262ac5e378d.redeem`. They take a while to produce (because they consist of a lot of
+zk-STARK proofs), so wait a while before the redeem file appears.
+
+Generally speaking you get one redemption claim per wallet. So if re-execute the command, you will
+generate a new redeem file with a new name, but this redeem file is essentially the same claim as
+the first one. You can only submit one redemption per UTXO.
+
+Every redemption claim is tailored to a receiving address, which is the one that will be credited on
+the reboot network. By default the receiving address is identical to the running node's 0th
+generation address, which you can display with `neptune-cli premine-receiving-address`. If you want
+to supply an alternate address, then call `redeem-utxos` with flag `--address <alternate-address>`.
+
+The redeem file is stored to a directory which is by default `redemption-claims/`. You can override
+this directory with the flag `--directory <other-directory/>`.
+
+ 3. Verify the UTXO redemption claim: `neptune-cli verify-redemption`.
+
+This command will instruct the running node to read all redeem files from the directory
+(`redemption-claims/` or whatever it was overridden to) and verify them. If all claims are valid and
+mutually compatible, it will produce a report of all claims and amounts. If you're just interested
+in producing and submitting your own claim, this report will contain one line.
+
+ 4. Send the redeem file to us.
