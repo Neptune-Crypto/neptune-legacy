@@ -1,13 +1,16 @@
-# Neptune Core
+# Neptune Legacy
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub CI](https://github.com/Neptune-Crypto/neptune-core/actions/workflows/main.yml/badge.svg)](https://github.com/Neptune-Crypto/neptune-core/actions/workflows/main.yml)
 [![crates.io](https://img.shields.io/crates/v/neptune-cash.svg)](https://crates.io/crates/neptune-cash)
 [![Coverage Status](https://coveralls.io/repos/github/Neptune-Crypto/neptune-core/badge.svg?branch=master)](https://coveralls.io/github/Neptune-Crypto/neptune-core?branch=master)
 
-Neptune-core is the reference implementation for the [Neptune](https://neptune.cash/) protocol. The
-implementation is not complete yet, but already supports many integral components and mainnet is
-live.
+Neptune-legacy is the reference implementation for the legacy version of the
+[Neptune Cash](https://neptune.cash) protocol, which was live from 2025-02-11 until 2025-07-04 when
+an [undetectable inflation bug](https://neptune.cash/blog/inflation-bug-discovered/) was discovered.
+The network lives on for owners of UTXOs to exercise
+[UTXO redemption claims](https://neptune.cash/blog/utxo-redemption/) and be credited with on the
+[rebooted network](https://github.com/Neptune-Crypto/neptune-core).
 
 ## Disclaimer
 
@@ -62,10 +65,7 @@ Windows should just work out-of-the-box with cargo build etc.
 - Generate a wallet file: `neptune-cli generate-wallet`
 - Run neptune-core daemon: `neptune-core` with flags
     - `--peers [ip_address:port]` to connect to a given peer, for instance
-      `--peers 51.15.139.238:9798` or `--peers 139.162.193.206:9798` or
-      `--peers [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798`.
-    - `--compose --guess` to mine — if you want to generate testnet coins to test sending and
-      receiving
+    `--peers 139.162.193.206:19798`
     - `--help` to get a list of available command-line arguments
 
 If you don't have a static IPv4, then try connecting to other nodes with IPv6. It's our experience
