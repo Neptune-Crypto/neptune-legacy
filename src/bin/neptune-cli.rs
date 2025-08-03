@@ -1657,7 +1657,7 @@ impl FromStr for HexDigest {
 /// - Returns the usable directory PathBuf if successful.
 /// - Otherwise, returns a relevant io::Error.
 ///
-/// Credit to [https://www.perplexity.ai].
+/// Credit to [<https://www.perplexity.ai>].
 pub fn ensure_writable_dir(path_opt: Option<PathBuf>, default: PathBuf) -> io::Result<PathBuf> {
     // Use default directory if Option is None
     let dir = path_opt.unwrap_or(default);
