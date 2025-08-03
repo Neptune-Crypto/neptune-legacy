@@ -2370,7 +2370,7 @@ pub(crate) mod tests {
             {
                 let seed: [u8; 32] = rng.random();
                 let first_block = first_block.clone();
-                let coinbase_recipient = coinbase_recipient.clone();
+                let coinbase_recipient = *coinbase_recipient;
                 let all_branches = all_branches.clone();
                 handles.push(tokio::spawn(async move {
                     let branch = make_one_branch(
@@ -2447,11 +2447,10 @@ pub(crate) mod tests {
             );
             let kernel = primitive_witness.kernel;
 
-            let transaction = Transaction {
+            Transaction {
                 kernel,
                 proof: TransactionProof::invalid(),
-            };
-            transaction
+            }
         }
     }
 

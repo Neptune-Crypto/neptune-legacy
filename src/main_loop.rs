@@ -3014,7 +3014,7 @@ mod tests {
                     &mut mutable_main_loop_state,
                 )
                 .await;
-            let channel_remains_open_3 = miner_block_handler_result_3.is_ok_and(|x| x == None);
+            let channel_remains_open_3 = miner_block_handler_result_3.is_ok_and(|x| x.is_none());
             assert!(channel_remains_open_3);
             let message_sent_to_miner_3 = main_to_miner_rx.recv().await.unwrap();
             assert_eq!(MainToMiner::Continue, message_sent_to_miner_3,);
