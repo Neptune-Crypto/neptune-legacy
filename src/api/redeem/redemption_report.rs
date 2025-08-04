@@ -1,3 +1,5 @@
+use std::ops::Add;
+
 use itertools::Itertools;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
@@ -144,6 +146,25 @@ impl Distribution<RedemptionReportEntry> for StandardUniform {
     }
 }
 
+impl Add<&RedemptionReportEntry> for &RedemptionReportEntry {
+    type Output = RedemptionReportEntry;
+
+    fn add(self, rhs: &RedemptionReportEntry) -> Self::Output {
+        let earliest_release_date = self
+            .earliest_release_date
+            .into_iter()
+            .chain(rhs.earliest_release_date)
+            .min();
+        let amount = self.amount + rhs.amount;
+        let address = self.address;
+        RedemptionReportEntry {
+            amount,
+            earliest_release_date,
+            address,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RedemptionReport {
     table: Vec<RedemptionReportEntry>,
@@ -152,6 +173,33 @@ pub struct RedemptionReport {
 impl RedemptionReport {
     pub fn new() -> Self {
         Self { table: vec![] }
+    }
+
+    /// Compresses all rows that have the same destination address and timelock,
+    /// ignoring the concrete release date.
+    pub fn compressed(self) -> Self {
+        let mut new_table: Vec<RedemptionReportEntry> = vec![];
+        for old_row in self.table {
+            let mut have_match = false;
+            'inner: for new_row in &mut new_table {
+                if old_row.address != new_row.address {
+                    continue;
+                }
+                match (new_row.earliest_release_date, old_row.earliest_release_date) {
+                    (None, Some(_)) | (Some(_), None) => (),
+                    _ => {
+                        *new_row = &old_row + new_row;
+                        have_match = true;
+                        break 'inner;
+                    }
+                }
+            }
+
+            if !have_match {
+                new_table.push(old_row);
+            }
+        }
+        Self { table: new_table }
     }
 
     pub fn add_row(

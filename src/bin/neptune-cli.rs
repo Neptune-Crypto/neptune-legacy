@@ -281,22 +281,35 @@ enum Command {
 
     /// Produce a redemption claim for owned UTXOs.
     ///
+    /// Your node must be synced to block 21310 (and not later) to exercise this
+    /// claim. To set your blockchain state to this block, use `neptune-cli
+    /// set-tip ecfae777da1a6b5ad97d3d793cb64b0cb4262ac5e378d2f4e2a5049e731298e058b2000000000000`.
+    ///
     /// Arguments:
     ///
     ///  - `--directory` (optional): specifies where to store the redemption
     ///    claims. If no directory is supplied, default value
     ///    "redemption-claims/" is used. In either case, the directory will be
     ///    created if it does not already exist; and it must be writable.
+    ///
     ///  - `--address` (optional): specifies a generation receiving address
     ///    (`nolgam1*`) into which to consolidate redeemed UTXOs. If no address
     ///    is supplied, the current node's premine receiving address will be
     ///    used.
+    ///
+    ///  - `--chunk-size` (optional): specifies the max number of input UTXOs to
+    ///    use for each redemption claim. Use this option if your wallet manages
+    ///    a large number of UTXOs and producing a UTXO redemption claim for
+    ///    them is prohibitively expensive.
     RedeemUtxos {
         #[clap(long)]
         directory: Option<PathBuf>,
 
         #[clap(long)]
         address: Option<String>,
+
+        #[clap(long)]
+        chunk_size: Option<usize>,
     },
 
     /// Verify redemption claims.
@@ -306,14 +319,21 @@ enum Command {
     ///  - `--directory` (optional): specifies where to find the redemption
     ///    claims. If no directory is supplied, default value
     ///    "redemption-claims/" will be used.
+    ///
     ///  - `--format` (optional): specifies which format to use for the table
     ///    in the report. Options are "reabable" (default) and "detailed".
+    ///
+    ///  - `--compressed` (default false): whether to compress the rows of the
+    ///    report.
     VerifyRedemption {
         #[clap(long)]
         directory: Option<PathBuf>,
 
         #[clap(long, default_value_t)]
         format: RedemptionReportDisplayFormat,
+
+        #[clap(long)]
+        compressed: bool,
     },
 
     /******** BLOCKCHAIN STATISTICS ********/
@@ -1059,7 +1079,11 @@ async fn main() -> Result<()> {
             println!("{} bytes", size_in_bytes);
         }
 
-        Command::RedeemUtxos { directory, address } => {
+        Command::RedeemUtxos {
+            directory,
+            address,
+            chunk_size,
+        } => {
             let address = if address.is_none() {
                 None
             } else {
@@ -1101,7 +1125,7 @@ async fn main() -> Result<()> {
             };
 
             client
-                .redeem_utxos(ctx, token, absolute_path, address)
+                .redeem_utxos(ctx, token, absolute_path, address, chunk_size)
                 .await??;
 
             println!(
@@ -1111,7 +1135,11 @@ async fn main() -> Result<()> {
             );
         }
 
-        Command::VerifyRedemption { directory, format } => {
+        Command::VerifyRedemption {
+            directory,
+            format,
+            compressed,
+        } => {
             let default_directory: PathBuf = "redemption-claims/".into();
             let Some(directory) = ensure_readable_dir(directory.clone(), default_directory.clone())
             else {
@@ -1122,7 +1150,10 @@ async fn main() -> Result<()> {
                 return Ok(());
             };
 
-            let report = client.verify_redemption(ctx, token, directory).await??;
+            let mut report = client.verify_redemption(ctx, token, directory).await??;
+            if compressed {
+                report = report.compressed();
+            }
             println!("{}", report.render(format));
         }
 

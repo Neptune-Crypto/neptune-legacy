@@ -1200,6 +1200,7 @@ pub trait RPC {
         token: rpc_auth::Token,
         directory: PathBuf,
         address: Option<GenerationReceivingAddress>,
+        chunk_size: Option<usize>,
     ) -> RpcResult<()>;
 
     /// Produce and return a report on the outstanding redemption claims
@@ -3792,6 +3793,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
         directory: PathBuf,
         address: Option<GenerationReceivingAddress>,
+        chunk_size: Option<usize>,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -3803,6 +3805,7 @@ impl RPC for NeptuneRPCServer {
             directory,
             address,
             Timestamp::now() + four_years,
+            chunk_size,
         )?)
     }
 
