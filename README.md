@@ -23,6 +23,14 @@ The network lives on for owners of UTXOs to exercise
 
 ## Installing
 
+Installation from released binaries is easiest and recommended. If that does not work, or if you need features that live
+on master but have not been released yet, you will need to compile from source.
+
+### Released Binaries
+
+ - Go to the [releases page](https://github.com/Neptune-Crypto/neptune-legacy/releases).
+ - Run the suggested (power)shell script; or download and install the installer matching with your platform.
+
 ### Compile from Source -- Linux Debian/Ubuntu
 
 - Open a terminal to run the following commands.
@@ -43,7 +51,7 @@ The network lives on for owners of UTXOs to exercise
 > Any branch except tag `release` is considered an _unstable development_ branch. Should you choose to use
 > such a branch, you risk database corruption, loss of funds, crashing user interfaces, _etc_.
 
-### Windows
+### Compile from Source -- Windows
 
 To install Rust and cargo on Windows, you can
 follow [these instructions](https://doc.rust-lang.org/cargo/getting-started/installation.html).
