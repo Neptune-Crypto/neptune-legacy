@@ -194,28 +194,33 @@ impl Redeemer {
         // generate new addresses.
         let mut state_lock = StateLock::read_guard(gsl).await;
 
-        // Determine amount. Entire spendable balance.
-        let total_amount = state_lock
+        let spendable_inputs = state_lock
             .gs()
-            .get_wallet_status_for_tip()
+            .wallet_spendable_inputs(timestamp)
             .await
-            .synced_unspent_available_amount(timestamp);
+            .into_iter()
+            .collect_vec();
+        tracing::info!(
+            "found {} spendable inputs in wallet",
+            spendable_inputs.len()
+        );
+        let claimable_inputs = spendable_inputs
+            .into_iter()
+            .filter(|tx_input| {
+                absolute_index_set_to_aocl_leaf_index_lower_bound(tx_input.absolute_index_set())
+                    >= ALLOWABLE_AOCL_INDEX_LOWER_BOUND
+            })
+            .collect_vec();
+        tracing::info!("of which {} are claimable", claimable_inputs.len());
+        let total_amount = claimable_inputs
+            .iter()
+            .map(|tx_input| tx_input.utxo.get_native_currency_amount())
+            .sum::<NativeCurrencyAmount>();
+        tracing::info!("total claimable amount at {}", total_amount);
 
         // Select inputs. Wipe them out. All of them.
         let tx_inputs = TxInputListBuilder::new()
-            .spendable_inputs(
-                state_lock
-                    .gs()
-                    .wallet_spendable_inputs(timestamp)
-                    .await
-                    .into_iter()
-                    .filter(|tx_input| {
-                        absolute_index_set_to_aocl_leaf_index_lower_bound(
-                            tx_input.absolute_index_set(),
-                        ) >= ALLOWABLE_AOCL_INDEX_LOWER_BOUND
-                    })
-                    .collect(),
-            )
+            .spendable_inputs(claimable_inputs)
             .policy(crate::api::export::InputSelectionPolicy::ByProvidedOrder)
             .spend_amount(total_amount)
             .build()
