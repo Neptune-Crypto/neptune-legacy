@@ -2270,6 +2270,23 @@ impl NeptuneRPCServer {
     pub fn data_directory(&self) -> &DataDirectory {
         &self.data_directory
     }
+
+    async fn freeze_and_set_tip(&mut self, indicated_tip: Digest) -> RpcResult<()> {
+        // Freeze. Do not process blocks in the course of this RPC endpoint
+        // handler or afterwards. The user needs to unfreeze manually.
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::Freeze)
+            .await
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        // Set tip.
+        self.state
+            .lock_guard_mut()
+            .await
+            .set_tip_to_stored_block(indicated_tip)
+            .await
+            .map_err(|e| RpcError::Failed(format!("failed to set tip to stored block: {e}")))
+    }
 }
 
 impl RPC for NeptuneRPCServer {
@@ -3438,20 +3455,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        // Freeze. Do not process blocks in the course of this RPC endpoint
-        // handler or afterwards. The user needs to unfreeze manually.
-        self.rpc_server_to_main_tx
-            .send(RPCServerToMain::Freeze)
-            .await
-            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
-
-        // Set tip.
-        self.state
-            .lock_guard_mut()
-            .await
-            .set_tip_to_stored_block(indicated_tip)
-            .await
-            .map_err(|e| RpcError::Failed(format!("failed to set tip to stored block: {e}")))
+        self.freeze_and_set_tip(indicated_tip).await
     }
 
     // Documented in trait. Do not add doc-comment.
@@ -3788,7 +3792,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn redeem_utxos(
-        self,
+        mut self,
         _context: ::tarpc::context::Context,
         token: rpc_auth::Token,
         directory: PathBuf,
@@ -3799,6 +3803,19 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         tracing::info!("Received redeem_utxos RPC call.");
+
+        let tip_hash = self.state.lock_guard().await.chain.light_state().hash();
+        let target_block_hash =
+            "ecfae777da1a6b5ad97d3d793cb64b0cb4262ac5e378d2f4e2a5049e731298e058b2000000000000"
+                .to_string();
+        if tip_hash.to_hex() != target_block_hash {
+            info!("current tip not set to target block {target_block_hash}, so setting tip ...");
+            self.freeze_and_set_tip(Digest::try_from_hex(target_block_hash).unwrap())
+                .await?;
+        } else {
+            info!("current tip already set to taret block hash {target_block_hash}. Good!");
+        }
+
         // delta-time to expire time-locks
         let four_years = Timestamp::years(4);
         Ok(self.state.api().redeemer().start_redeeming_utxos(
@@ -3817,6 +3834,18 @@ impl RPC for NeptuneRPCServer {
     ) -> RpcResult<RedemptionReport> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
+
+        let tip_hash = self.state.lock_guard().await.chain.light_state().hash();
+        let target_block_hash =
+            "ecfae777da1a6b5ad97d3d793cb64b0cb4262ac5e378d2f4e2a5049e731298e058b2000000000000"
+                .to_string();
+        if tip_hash.to_hex() != target_block_hash {
+            error!("Current tip not set to target block {target_block_hash}.");
+            error!("You want to set tip to {target_block_hash} before continuing.");
+            error!("Try: neptune-cli set-tip {target_block_hash}");
+            return Err(RpcError::Failed("tip not set right".to_string()));
+        }
+        info!("tip hash set right. good.");
 
         Ok(self
             .state
