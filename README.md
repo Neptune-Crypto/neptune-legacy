@@ -29,7 +29,7 @@ on master but have not been released yet, you will need to compile from source.
 ### Released Binaries
 
  - Go to the [releases page](https://github.com/Neptune-Crypto/neptune-legacy/releases).
- - Run the suggested (power)shell script; or download and install the installer matching with your platform.
+ - Run download and install the binaries and/or installer matching with your platform.
 
 ### Compile from Source -- Linux Debian/Ubuntu
 
