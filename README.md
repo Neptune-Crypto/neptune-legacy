@@ -177,30 +177,30 @@ against these resources.
 This sets the blockchain-state of the node to block 21310. It will also freeze the node, so that 
 announced blocks and transactions are ignored.
 
- 2. Produce the UTXO redemption claim: `neptune-cli redeem-utxos`.
+ 2. Produce the UTXO redemption claims: `neptune-cli redeem-utxos`.
 
 Note that the CLI command will return quickly, but the the running node will start producing
-redemption claims. Specifically, redemption claims live in files called somthing like
-`b64b0cb4262ac5e378d.redeem`. They take a while to produce (because they consist of a lot of
-zk-STARK proofs), so wait a while before the redeem file appears.
+redemption claims. Specifically, redemption claims live in files called something like
+`b4278d62ac5e364b0cb4262ac5e378d.redeem`. They take a while to produce (because they consist of a
+lot of zk-STARK proofs), so wait a while before the redeem file appears.
 
-Generally speaking you get one redemption claim per wallet. So if re-execute the command, you will
-generate a new redeem file with a new name, but this redeem file is essentially the same claim as
-the first one. You can only submit one redemption per UTXO.
+If your wallet manages a lot of UTXOs, this command will automatically split the redemption into
+several chunks. Every chunk produces one `.redeem` file. You can regulate the chunk size with the
+optional CLI flag `--chunk-size`. Bigger chunks means more proving work but also less data and fewer
+files.
 
 Every redemption claim is tailored to a receiving address, which is the one that will be credited on
 the reboot network. By default the receiving address is identical to the running node's 0th
 generation address, which you can display with `neptune-cli premine-receiving-address`. If you want
 to supply an alternate address, then call `redeem-utxos` with flag `--address <alternate-address>`.
 
-The redeem file is stored to a directory which is by default `redemption-claims/`. You can override
-this directory with the flag `--directory <other-directory/>`.
+The redeem files are stored to a directory which is by default `redemption-claims/`. You can
+override this directory with the flag `--directory <other-directory/>`.
 
- 3. Verify the UTXO redemption claim: `neptune-cli verify-redemption`.
+ 3. Verify the UTXO redemption claims: `neptune-cli verify-redemption`.
 
 This command will instruct the running node to read all redeem files from the directory
 (`redemption-claims/` or whatever it was overridden to) and verify them. If all claims are valid and
-mutually compatible, it will produce a report of all claims and amounts. If you're just interested
-in producing and submitting your own claim, this report will contain one line.
+mutually compatible, it will produce a report of all claims and amounts.
 
- 4. Send the redeem file to us.
+ 4. Send the redeem files to us.

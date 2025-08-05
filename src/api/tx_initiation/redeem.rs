@@ -19,7 +19,6 @@
 use std::path::PathBuf;
 
 use itertools::Itertools;
-use num_traits::CheckedSub;
 use rand::rng;
 use rand::Rng;
 use tasm_lib::prelude::Digest;
@@ -149,11 +148,13 @@ impl Redeemer {
         directory: PathBuf,
         address: Option<GenerationReceivingAddress>,
         timestamp: Timestamp,
+        chunk_size: Option<usize>,
     ) -> Result<(), RedeemError> {
         self.can_proceed()?;
 
         let _handle = tokio::task::spawn(async move {
-            self.redeem_utxos(directory, address, timestamp).await;
+            self.redeem_utxos(directory, address, timestamp, chunk_size)
+                .await;
         });
 
         Ok(())
@@ -165,9 +166,10 @@ impl Redeemer {
         directory: PathBuf,
         address: Option<GenerationReceivingAddress>,
         timestamp: Timestamp,
+        chunk_size: Option<usize>,
     ) {
         tracing::info!("Started producing UTXO redemption claim ...");
-        let tx_details = match self.assemble_data(address, timestamp).await {
+        let tx_details_list = match self.assemble_data(address, timestamp, chunk_size).await {
             Ok(txd) => txd,
             Err(e) => {
                 tracing::error!("Could not assemble data for UTXO redemption claim: {}", e);
@@ -175,20 +177,28 @@ impl Redeemer {
             }
         };
 
-        tracing::info!("Obtained TX details for UTXO redemption claim; proceeding to assembling proof collection ...");
+        tracing::info!("Obtained TX details for UTXO redemption claim; proceeding to assembling proof collections ...");
         let job_options = self.global_state_lock.cli().as_proof_job_options();
-
-        Self::worker(directory, tx_details, job_options).await;
+        let num_redemption_claims = tx_details_list.len();
+        for (i, tx_details) in tx_details_list.into_iter().enumerate() {
+            tracing::info!("starting redemption claim {i}/{num_redemption_claims}");
+            Self::worker(directory.clone(), tx_details, job_options.clone()).await;
+        }
+        tracing::info!(
+            "finished producing {num_redemption_claims}; check {}",
+            directory.to_string_lossy()
+        );
     }
 
     async fn assemble_data(
         &self,
         destination_address: Option<GenerationReceivingAddress>,
         timestamp: Timestamp,
-    ) -> Result<TransactionDetails, RedeemError> {
+        chunk_size: Option<usize>,
+    ) -> Result<Vec<TransactionDetails>, RedeemError> {
         let gsl = &self.global_state_lock;
 
-        tracing::info!("Assembling data for UTXO redemption claim ...");
+        tracing::info!("Assembling data for UTXO redemption claim(s) ...");
 
         // Acquire lock. Write-lock is unnecessary because we do not need to
         // generate new addresses.
@@ -219,7 +229,7 @@ impl Redeemer {
         tracing::info!("total claimable amount at {}", total_amount);
 
         // Select inputs. Wipe them out. All of them.
-        let tx_inputs = TxInputListBuilder::new()
+        let all_tx_inputs = TxInputListBuilder::new()
             .spendable_inputs(claimable_inputs)
             .policy(crate::api::export::InputSelectionPolicy::ByProvidedOrder)
             .spend_amount(total_amount)
@@ -227,99 +237,116 @@ impl Redeemer {
             .into_iter()
             .collect_vec();
 
-        // Determine time-locked amount.
-        let timelocked_amount = tx_inputs
-            .iter()
-            .filter(|txinput| txinput.utxo.release_date().is_some())
-            .map(|txinput| txinput.utxo.get_native_currency_amount())
-            .sum::<NativeCurrencyAmount>();
+        let mut transaction_details_list = vec![];
+        let minimum_chunk_size = 1;
+        let default_chunk_size = 10;
+        let chunk_size = chunk_size
+            .map(|cs| usize::max(cs, minimum_chunk_size))
+            .unwrap_or(default_chunk_size);
+        for tx_inputs in all_tx_inputs.chunks(chunk_size) {
+            // Determine time-locked amount.
+            let timelocked_amount = tx_inputs
+                .iter()
+                .filter(|txinput| txinput.utxo.release_date().is_some())
+                .map(|txinput| txinput.utxo.get_native_currency_amount())
+                .sum::<NativeCurrencyAmount>();
 
-        // Determine liquid amount: difference between time-locked and total.
-        let liquid_amount = total_amount.checked_sub(&timelocked_amount).unwrap();
+            // Determine liquid amount.
+            let liquid_amount = tx_inputs
+                .iter()
+                .filter(|txinput| txinput.utxo.release_date().is_none())
+                .map(|txinput| txinput.utxo.get_native_currency_amount())
+                .sum::<NativeCurrencyAmount>();
 
-        // Determine release date: earliest of all time-locks (if any).
-        let earliest_release_date = tx_inputs
-            .iter()
-            .filter_map(|tx_input| tx_input.utxo.release_date())
-            .min();
+            // Determine release date: earliest of all time-locks (if any).
+            let earliest_release_date = tx_inputs
+                .iter()
+                .filter_map(|tx_input| tx_input.utxo.release_date())
+                .min();
 
-        // Determine recipient address.
-        let recipient = destination_address.unwrap_or_else(|| {
-            state_lock
-                .gs()
-                .wallet_state
-                .wallet_entropy
-                .nth_generation_spending_key(0)
-                .to_address()
-        });
+            // Determine recipient address.
+            let recipient = destination_address.unwrap_or_else(|| {
+                state_lock
+                    .gs()
+                    .wallet_state
+                    .wallet_entropy
+                    .nth_generation_spending_key(0)
+                    .to_address()
+            });
 
-        // Generate outputs. No notifications.
-        let liquid_utxo = Utxo::new(
-            recipient.lock_script(),
-            vec![Coin::new_native_currency(liquid_amount)],
-        );
-        let [liquid_sender_randomness, liquid_privacy_digest, timelocked_sender_randomness, timelocked_privacy_digest] = {
-            // Keep thread-unsafe RNG inside of a sync scope to avoid async
-            // issues.
-            let mut rng = rng();
-            [
-                rng.random::<Digest>(),
-                rng.random::<Digest>(),
-                rng.random::<Digest>(),
-                rng.random::<Digest>(),
-            ]
-        };
-        let liquid_output = TxOutput::no_notification_as_change(
-            liquid_utxo,
-            liquid_sender_randomness,
-            liquid_privacy_digest,
-        );
-        let mut tx_outputs = vec![liquid_output];
-        if let Some(release_date) = earliest_release_date {
-            let timelocked_utxo = Utxo::new(
+            // Generate outputs. No notifications.
+            let liquid_utxo = Utxo::new(
                 recipient.lock_script(),
-                vec![Coin::new_native_currency(timelocked_amount)],
-            )
-            .with_time_lock(release_date);
-            let timelocked_output = TxOutput::no_notification_as_change(
-                timelocked_utxo,
-                timelocked_sender_randomness,
-                timelocked_privacy_digest,
+                vec![Coin::new_native_currency(liquid_amount)],
             );
-            tx_outputs.push(timelocked_output);
-        }
-
-        // Add plaintext output UTXOs as public announcements.
-        let mut public_announcements = vec![];
-        for tx_output in &tx_outputs {
-            let utxo_triple = UtxoTriple::from(tx_output.clone());
-            let public_announcement = PublicAnnouncement {
-                message: utxo_triple.encode(),
+            let [liquid_sender_randomness, liquid_privacy_digest, timelocked_sender_randomness, timelocked_privacy_digest] = {
+                // Keep thread-unsafe RNG inside of a sync scope to avoid async
+                // issues.
+                let mut rng = rng();
+                [
+                    rng.random::<Digest>(),
+                    rng.random::<Digest>(),
+                    rng.random::<Digest>(),
+                    rng.random::<Digest>(),
+                ]
             };
-            public_announcements.push(public_announcement);
+            let liquid_output = TxOutput::no_notification_as_change(
+                liquid_utxo,
+                liquid_sender_randomness,
+                liquid_privacy_digest,
+            );
+            let mut tx_outputs = vec![liquid_output];
+            if let Some(release_date) = earliest_release_date {
+                let timelocked_utxo = Utxo::new(
+                    recipient.lock_script(),
+                    vec![Coin::new_native_currency(timelocked_amount)],
+                )
+                .with_time_lock(release_date);
+                let timelocked_output = TxOutput::no_notification_as_change(
+                    timelocked_utxo,
+                    timelocked_sender_randomness,
+                    timelocked_privacy_digest,
+                );
+                tx_outputs.push(timelocked_output);
+            }
+
+            // Add plaintext output UTXOs as public announcements.
+            let mut public_announcements = vec![];
+            for tx_output in &tx_outputs {
+                let utxo_triple = UtxoTriple::from(tx_output.clone());
+                let public_announcement = PublicAnnouncement {
+                    message: utxo_triple.encode(),
+                };
+                public_announcements.push(public_announcement);
+            }
+
+            // Add the receiving address as public announcement.
+            public_announcements.push(PublicAnnouncement {
+                message: recipient.encode(),
+            });
+
+            // Generate transaction details. No change, so no risk of changing
+            // outputs.
+            let transaction_details = TransactionDetailsBuilder::new()
+                .inputs(tx_inputs.to_vec().into())
+                .outputs(tx_outputs.into())
+                .fee(NativeCurrencyAmount::coins(0))
+                .change_policy(ChangePolicy::ExactChange)
+                .public_announcements(public_announcements)
+                .timestamp(timestamp)
+                .build(&mut state_lock)
+                .await
+                .map_err(RedeemError::from)?;
+
+            transaction_details_list.push(transaction_details);
         }
 
-        // Add the receiving address as public announcement.
-        public_announcements.push(PublicAnnouncement {
-            message: recipient.encode(),
-        });
+        tracing::info!(
+            "Done assembling data for {} UTXO redemption claim(s).",
+            transaction_details_list.len()
+        );
 
-        // Generate transaction details. No change, so no risk of changing
-        // outputs.
-        let transaction_details = TransactionDetailsBuilder::new()
-            .inputs(tx_inputs.into())
-            .outputs(tx_outputs.into())
-            .fee(NativeCurrencyAmount::coins(0))
-            .change_policy(ChangePolicy::ExactChange)
-            .public_announcements(public_announcements)
-            .timestamp(timestamp)
-            .build(&mut state_lock)
-            .await
-            .map_err(RedeemError::from)?;
-
-        tracing::info!("Done assembling data for UTXO redemption claim.");
-
-        Ok(transaction_details)
+        Ok(transaction_details_list)
     }
 
     async fn worker(
@@ -612,6 +639,7 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::mutator_set::get_swbf_indices;
     use macro_rules_attr::apply;
+    use num_traits::CheckedSub;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
     use tracing_test::traced_test;
@@ -746,7 +774,7 @@ mod tests {
         alice
             .api()
             .redeemer()
-            .redeem_utxos(directory.clone().into(), Some(address), timestamp)
+            .redeem_utxos(directory.clone().into(), Some(address), timestamp, Some(2))
             .await;
 
         // verify redemption
@@ -755,7 +783,8 @@ mod tests {
             .redeemer()
             .validate_redemption(directory.clone().into())
             .await
-            .unwrap();
+            .unwrap()
+            .compressed();
 
         // match the obtained report against what we expect
         let mut expected_report = RedemptionReport::new();
@@ -784,6 +813,12 @@ mod tests {
         tokio::fs::remove_dir_all(directory)
             .await
             .unwrap_or_else(|e| panic!("could not delete temp direcrory for tests: {e}"));
+
+        // show report in case the user wants to see
+        println!(
+            "{}",
+            produced_report.render(RedemptionReportDisplayFormat::Readable)
+        );
     }
 
     #[test]
