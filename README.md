@@ -165,9 +165,10 @@ against these resources.
 
 ### Pre-requisites
 
- - A running legacy node synced to block 21310 (or later).
+ - The node must installed. Use `cargo install --locked --path .`, or put the binaries in your shell path. (Running `neptune-core` via `cargo run` will *not* work.)
+ - The node must be running and synced to block 21310 (or later).
  - >5 GB of free RAM.
- - A terminal for using the command-line interface.
+ - A terminal for using the command-line interface and inspecting the log output of the node.
  - The command-line interface, `neptune-cli`.
 
 ### Instructions
