@@ -1150,11 +1150,10 @@ async fn main() -> Result<()> {
                 return Ok(());
             };
 
-            let mut report = client.verify_redemption(ctx, token, directory).await??;
-            if compressed {
-                report = report.compressed();
-            }
-            println!("{}", report.render(format));
+            let report_file_name = client
+                .verify_redemption(ctx, token, directory, format, compressed)
+                .await??;
+            println!("Validation might take a while. It will be written to {report_file_name} when it's done.");
         }
 
         /******** BLOCKCHAIN STATISTICS ********/

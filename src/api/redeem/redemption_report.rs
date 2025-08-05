@@ -17,7 +17,9 @@ use crate::api::export::Network;
 use crate::api::export::Timestamp;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 
-#[derive(Debug, Clone, Copy, Default, EnumString, VariantNames, Display)]
+#[derive(
+    Debug, Clone, Copy, Default, EnumString, VariantNames, Display, Serialize, Deserialize,
+)]
 #[strum(serialize_all = "kebab_case", ascii_case_insensitive)]
 pub enum RedemptionReportDisplayFormat {
     #[default]

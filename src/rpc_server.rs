@@ -66,11 +66,12 @@ use tracing::warn;
 use twenty_first::prelude::Digest;
 
 use crate::api;
-use crate::api::export::RedemptionReport;
+use crate::api::redeem::redemption_report::RedemptionReportDisplayFormat;
 use crate::api::tx_initiation;
 use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::redeem::RedeemError;
+use crate::api::tx_initiation::redeem::Redeemer;
 use crate::api::tx_initiation::redeem::RedemptionValidationError;
 use crate::config_models::network::Network;
 use crate::macros::fn_name;
@@ -1209,7 +1210,9 @@ pub trait RPC {
     async fn verify_redemption(
         token: rpc_auth::Token,
         directory: PathBuf,
-    ) -> RpcResult<RedemptionReport>;
+        format: RedemptionReportDisplayFormat,
+        compressed: bool,
+    ) -> RpcResult<String>;
 
     /// Return the information used on the dashboard's overview tab
     ///
@@ -3831,28 +3834,46 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
         directory: PathBuf,
-    ) -> RpcResult<RedemptionReport> {
+        format: RedemptionReportDisplayFormat,
+        compressed: bool,
+    ) -> RpcResult<String> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
         let tip_hash = self.state.lock_guard().await.chain.light_state().hash();
-        let target_block_hash =
-            "ecfae777da1a6b5ad97d3d793cb64b0cb4262ac5e378d2f4e2a5049e731298e058b2000000000000"
-                .to_string();
-        if tip_hash.to_hex() != target_block_hash {
-            error!("Current tip not set to target block {target_block_hash}.");
-            error!("You want to set tip to {target_block_hash} before continuing.");
-            error!("Try: neptune-cli set-tip {target_block_hash}");
-            return Err(RpcError::Failed("tip not set right".to_string()));
+        let target_block_hash = Digest::try_from_hex(
+            "ecfae777da1a6b5ad97d3d793cb64b0cb4262ac5e378d2f4e2a5049e731298e058b2000000000000",
+        )
+        .unwrap();
+        if tip_hash != target_block_hash {
+            warn!("Current tip not set to target block {target_block_hash:x}.");
+            warn!("Proceeding under the assumption that the target block was stored.");
+        } else {
+            info!("tip hash set right. good.");
         }
-        info!("tip hash set right. good.");
 
-        Ok(self
+        let report_file_name = "redemption_report.md".to_string();
+        let mutator_set_accumulator = self
             .state
-            .api()
-            .redeemer()
-            .validate_redemption(directory)
-            .await?)
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .get_block(target_block_hash)
+            .await
+            .map_err(|_e| RedemptionValidationError::InvalidChainState)?
+            .ok_or(RedemptionValidationError::InvalidChainState)?
+            .mutator_set_accumulator_after()
+            .map_err(|_e| RedemptionValidationError::InvalidChainState)?;
+        tokio::task::spawn(Redeemer::validate_redemption_and_write_report(
+            mutator_set_accumulator,
+            directory,
+            format,
+            compressed,
+            report_file_name.clone(),
+        ));
+
+        Ok(report_file_name)
     }
 }
 

@@ -16,6 +16,7 @@
 //! This API is analogous to [`tx_initiation/send.rs`](super::send).
 //!
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use itertools::Itertools;
@@ -26,6 +27,7 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use thiserror::Error;
 use tokio::fs;
 use tokio::fs::File;
+use tokio::io;
 use tokio::io::AsyncWriteExt;
 
 use crate::api::export::ChangePolicy;
@@ -38,6 +40,7 @@ use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionDetails;
 use crate::api::export::TransactionProofType;
+use crate::api::redeem::redemption_report::RedemptionReportDisplayFormat;
 use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_details_builder::TransactionDetailsBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
@@ -52,8 +55,8 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::triton_vm_job_queue::vm_job_queue;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::shared::BATCH_SIZE;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;
@@ -434,18 +437,49 @@ impl Redeemer {
     }
 
     /// Validate many UTXO redemption claims. Verify that they are valid
-    /// transactions and mutually compatible. Produce a report.
-    pub async fn validate_redemption(
-        &self,
+    /// transactions and mutually compatible. Produce a report. Store it to
+    /// disk.
+    pub async fn validate_redemption_and_write_report(
+        mutator_set_accumulator: MutatorSetAccumulator,
+        directory: PathBuf,
+        format: RedemptionReportDisplayFormat,
+        compressed: bool,
+        report_file_name: String,
+    ) {
+        let mut report = match Self::validate_redemption(mutator_set_accumulator, directory).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("{e}");
+                return;
+            }
+        };
+
+        if compressed {
+            tracing::info!("compressing report ...");
+            report = report.compressed();
+        }
+
+        tracing::info!("writing report to disk at {report_file_name} ...");
+        if let Err(e) = Self::store_report_to_disk(report, format, report_file_name).await {
+            tracing::error!("{e}");
+        }
+    }
+
+    async fn validate_redemption(
+        mutator_set_accumulator: MutatorSetAccumulator,
         directory: PathBuf,
     ) -> Result<RedemptionReport, RedemptionValidationError> {
         // read claims from disk
+        tracing::info!("reading claims from {} ...", directory.to_string_lossy());
         let redemption_claims = Self::load_redemption_claims_from_directory(directory).await?;
 
         // validate claims individually
+        tracing::info!("checking claims for validity ...");
         let mut invalid_claims = vec![];
         let network = Network::Main;
-        for (file_path, transaction) in &redemption_claims {
+        let num_claims = redemption_claims.len();
+        for (i, (file_path, transaction)) in redemption_claims.iter().enumerate() {
+            tracing::info!("{i}/{num_claims}");
             if !transaction.is_valid(network).await {
                 invalid_claims.push((file_path, transaction));
             }
@@ -462,14 +496,7 @@ impl Redeemer {
         }
 
         // validate synchronization to current mutator set hash
-        let mut mutator_set_accumulator = self
-            .global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .light_state()
-            .mutator_set_accumulator_after()
-            .map_err(|_e| RedemptionValidationError::InvalidChainState)?;
+        tracing::info!("checking that claims are synced to current tip ...");
         let mutator_set_hash = mutator_set_accumulator.hash();
         let mut unsynced_claims = vec![];
         for (file_path, transaction) in &redemption_claims {
@@ -489,7 +516,8 @@ impl Redeemer {
         }
 
         // validate earliest possible AOCL leaf indices
-        let mut all_removal_records = redemption_claims
+        tracing::info!("checking that claims do not pertain to premine UTXOs ...");
+        let all_removal_records = redemption_claims
             .iter()
             .flat_map(|(_fp, tx)| tx.kernel.inputs.clone())
             .collect_vec();
@@ -503,19 +531,28 @@ impl Redeemer {
             }
         }
 
-        // validate mutual compatibility with mutator set
-        while let Some(removal_record) = all_removal_records.pop() {
-            if !mutator_set_accumulator.can_remove(&removal_record) {
-                return Err(RedemptionValidationError::MutuallyIncompatibleClaims);
+        // validate no collisions
+        tracing::info!("verifying no-doublespends ...");
+        let mut unique_absolute_index_sets = HashSet::new();
+        for removal_record in &all_removal_records {
+            unique_absolute_index_sets.insert(removal_record.absolute_indices);
+        }
+        if unique_absolute_index_sets.len() != all_removal_records.len() {
+            return Err(RedemptionValidationError::MutuallyIncompatibleClaims);
+        }
+
+        // validate removal record validity
+        tracing::info!("verifying removal record validity ...");
+        for removal_record in &all_removal_records {
+            if !mutator_set_accumulator.can_remove(removal_record) {
+                return Err(RedemptionValidationError::InvalidRemovalRecord(Box::new(
+                    removal_record.absolute_indices,
+                )));
             }
-            RemovalRecord::batch_update_from_remove(
-                &mut all_removal_records.iter_mut().collect_vec(),
-                &removal_record,
-            );
-            mutator_set_accumulator.remove(&removal_record);
         }
 
         // parse claims; validate public announcements; produce report
+        tracing::info!("validation passed; producing report ...");
         let mut report = RedemptionReport::new();
         for (file_path, transaction) in redemption_claims {
             let mut utxo_triples = vec![];
@@ -563,6 +600,18 @@ impl Redeemer {
         }
 
         Ok(report)
+    }
+
+    async fn store_report_to_disk(
+        report: RedemptionReport,
+        report_format: RedemptionReportDisplayFormat,
+        report_file_name: String,
+    ) -> io::Result<()> {
+        let mut file_handle = tokio::fs::File::create(report_file_name).await?;
+        file_handle
+            .write_all(report.render(report_format).as_bytes())
+            .await?;
+        Ok(())
     }
 
     async fn load_redemption_claims_from_directory(
@@ -615,6 +664,8 @@ pub enum RedemptionValidationError {
     UnsyncedClaims(Vec<PathBuf>),
     #[error("one or more claims are mutually incompatible")]
     MutuallyIncompatibleClaims,
+    #[error("invalid removal record")]
+    InvalidRemovalRecord(Box<AbsoluteIndexSet>),
     #[error("potential premine claim: lower bound on AOCL leaf index is {0} < num premine UTXOs")]
     PotentialPremineClaim(u64),
     #[error("public announcement {1} of {0} cannot be parsed as UTXO or address")]
@@ -623,6 +674,8 @@ pub enum RedemptionValidationError {
     UtxoNotOutput(PathBuf, usize),
     #[error("destination address is missing")]
     MissingDestinationAddress,
+    #[error("failed to write report to disk: {0}")]
+    FileWrite(io::Error),
 }
 
 #[cfg(test)]
@@ -778,13 +831,18 @@ mod tests {
             .await;
 
         // verify redemption
-        let produced_report = alice
-            .api()
-            .redeemer()
-            .validate_redemption(directory.clone().into())
+        let mutator_set_accumulator = alice
+            .lock_guard()
             .await
-            .unwrap()
-            .compressed();
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .unwrap();
+        let produced_report =
+            Redeemer::validate_redemption(mutator_set_accumulator, directory.clone().into())
+                .await
+                .unwrap()
+                .compressed();
 
         // match the obtained report against what we expect
         let mut expected_report = RedemptionReport::new();
