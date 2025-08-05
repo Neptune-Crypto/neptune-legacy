@@ -48,6 +48,7 @@ use super::wallet_status::WalletStatusElement;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
+use crate::database::storage::storage_schema::traits::StorageWriter;
 use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_schema::RustyKey;
 use crate::database::storage::storage_schema::RustyValue;
@@ -67,6 +68,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::mempool_event::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
+use crate::models::state::wallet::address::AddressableKeyType;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::rusty_wallet_database::WalletDbConnectError;
 use crate::models::state::wallet::transaction_input::TxInput;
@@ -184,6 +186,22 @@ impl Debug for WalletState {
 }
 
 impl WalletState {
+    pub(crate) async fn set_key_counter(&mut self, keytype: AddressableKeyType, counter: u64) {
+        match keytype {
+            AddressableKeyType::Generation => {
+                self.wallet_db.set_generation_key_counter(counter).await;
+                self.known_generation_keys =
+                    Self::derive_generation_keys_upto(&self.wallet_entropy, counter);
+            }
+            AddressableKeyType::Symmetric => {
+                self.wallet_db.set_symmetric_key_counter(counter).await;
+                self.known_symmetric_keys =
+                    Self::derive_symmetric_keys_upto(&self.wallet_entropy, counter);
+            }
+        }
+        self.wallet_db.persist().await;
+    }
+
     /// Generate [`ComposerParameters`] for composing the next block.
     ///
     ///  # Panics
@@ -304,6 +322,24 @@ impl WalletState {
         Self::try_new(configuration, wallet_entropy, genesis).await
     }
 
+    fn derive_generation_keys_upto(
+        wallet_entropy: &WalletEntropy,
+        counter: u64,
+    ) -> Vec<SpendingKey> {
+        (0..counter)
+            .map(|idx| wallet_entropy.nth_generation_spending_key(idx).into())
+            .collect_vec()
+    }
+
+    fn derive_symmetric_keys_upto(
+        wallet_entropy: &WalletEntropy,
+        counter: u64,
+    ) -> Vec<SpendingKey> {
+        (0..counter)
+            .map(|idx| wallet_entropy.nth_symmetric_key(idx).into())
+            .collect_vec()
+    }
+
     /// Construct a `WalletState` object.
     pub(crate) async fn try_new(
         configuration: WalletConfiguration,
@@ -334,14 +370,16 @@ impl WalletState {
         let sync_label = rusty_wallet_database.get_sync_label();
 
         // generate and cache all used generation keys
-        let known_generation_keys = (0..rusty_wallet_database.get_generation_key_counter())
-            .map(|idx| wallet_entropy.nth_generation_spending_key(idx).into())
-            .collect_vec();
+        let known_generation_keys = Self::derive_generation_keys_upto(
+            &wallet_entropy,
+            rusty_wallet_database.get_generation_key_counter(),
+        );
 
         // generate and cache all used symmetric keys
-        let known_symmetric_keys = (0..rusty_wallet_database.get_symmetric_key_counter())
-            .map(|idx| wallet_entropy.nth_symmetric_key(idx).into())
-            .collect_vec();
+        let known_symmetric_keys = Self::derive_symmetric_keys_upto(
+            &wallet_entropy,
+            rusty_wallet_database.get_symmetric_key_counter(),
+        );
 
         let known_raw_hash_lock_keys = rusty_wallet_database
             .guesser_preimages()

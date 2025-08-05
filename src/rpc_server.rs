@@ -104,6 +104,7 @@ use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+use crate::models::state::wallet::address::AddressableKeyType;
 use crate::models::state::wallet::address::BaseKeyType;
 use crate::models::state::wallet::address::BaseSpendingKey;
 use crate::models::state::wallet::address::KeyType;
@@ -1973,6 +1974,14 @@ pub trait RPC {
     /// Unfreeze the blockchain state, so that new updates can be applied again.
     async fn unfreeze(token: rpc_auth::Token) -> RpcResult<()>;
 
+    /// Sets the key counter for the given key type. Useful for fixing syncing
+    /// glitches.
+    async fn set_key_counter(
+        token: rpc_auth::Token,
+        keytype: AddressableKeyType,
+        counter: u64,
+    ) -> RpcResult<()>;
+
     /// Gracious shutdown.
     ///
     /// ```no_run
@@ -3472,6 +3481,28 @@ impl RPC for NeptuneRPCServer {
             .send(RPCServerToMain::Unfreeze)
             .await
             .map_err(|e| RpcError::Failed(format!("Could not send message to main thread: {e}")))
+    }
+
+    async fn set_key_counter(
+        mut self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        keytype: AddressableKeyType,
+        counter: u64,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.state
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .set_key_counter(keytype, counter)
+            .await;
+
+        info!("processed request to key counter for {keytype} to {counter}");
+
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.

@@ -7,6 +7,8 @@
 //! types that have a corresponding address.  This specialization
 //! enables the type system to enforce correct-by-construction
 //! semantics wherever the type is used.
+use std::str::FromStr;
+
 use anyhow::bail;
 use anyhow::Result;
 use serde::Deserialize;
@@ -49,6 +51,18 @@ pub enum AddressableKeyType {
 
     /// [symmetric_key] built on aes-256-gcm
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
+}
+
+impl FromStr for AddressableKeyType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<AddressableKeyType, Self::Err> {
+        match s {
+            "generation" => Ok(AddressableKeyType::Generation),
+            "symmetric" => Ok(AddressableKeyType::Symmetric),
+            _ => Err("failed to parse".to_string()),
+        }
+    }
 }
 
 impl From<AddressableKeyType> for BaseKeyType {
