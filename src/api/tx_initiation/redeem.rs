@@ -18,6 +18,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use itertools::Itertools;
 use rand::rng;
@@ -642,8 +643,17 @@ impl Redeemer {
             let transaction = bincode::deserialize::<Transaction>(&bytes)
                 .map_err(|e| RedemptionValidationError::Deserialize(file_path.clone(), e))?;
 
-            transactions.push((file_path, transaction));
+            let modification_date = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+
+            transactions.push((file_path, transaction, modification_date));
         }
+
+        transactions.sort_by_key(|(_path, _tx, time)| *time);
+        let transactions = transactions
+            .into_iter()
+            .map(|(path, tx, _time)| (path, tx))
+            .collect_vec();
+
         Ok(transactions)
     }
 }
