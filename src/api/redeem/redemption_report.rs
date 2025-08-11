@@ -262,11 +262,21 @@ impl RedemptionReport {
         let column_widths = RedemptionReportEntry::column_widths(format);
         match format {
             RedemptionReportDisplayFormat::Readable => {
+                let total_amount = self
+                    .table
+                    .iter()
+                    .map(|tr| tr.amount)
+                    .sum::<NativeCurrencyAmount>();
                 let total_width = column_widths.into_iter().sum::<usize>()
                     + "| ".len()
                     + 2 * " | ".len()
                     + " |".len();
-                format!("{:-<width$}\n", "", width = total_width)
+                format!(
+                    "{:-<width$}\n| total: {}",
+                    "",
+                    total_amount.display_lossless(),
+                    width = total_width,
+                )
             }
             RedemptionReportDisplayFormat::Detailed => "".to_string(),
         }
