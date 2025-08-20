@@ -476,20 +476,29 @@ impl Redeemer {
 
         // validate claims individually
         tracing::info!("checking claims for validity ...");
-        let mut invalid_claims = vec![];
         let network = Network::Main;
         let num_claims = redemption_claims.len();
-        for (i, (file_path, transaction)) in redemption_claims.iter().enumerate() {
-            tracing::info!("{i}/{num_claims}");
-            if !transaction.is_valid(network).await {
-                invalid_claims.push((file_path, transaction));
+        let mut validation_task_handles = vec![];
+        for (i, (file_path, transaction)) in redemption_claims.iter().cloned().enumerate() {
+            validation_task_handles.push(tokio::task::spawn(async move {
+                tracing::info!("{i}/{num_claims}");
+                if !transaction.is_valid(network).await {
+                    Some((file_path, transaction))
+                } else {
+                    None
+                }
+            }));
+        }
+        let mut invalid_claims = vec![];
+        for th in validation_task_handles {
+            if let Some((file_path, transaction)) = th.await.unwrap() {
+                invalid_claims.push((file_path.clone(), transaction.clone()));
             }
         }
         if !invalid_claims.is_empty() {
             let file_names_of_invalid_claims = invalid_claims
                 .into_iter()
                 .map(|(file_path, _tx)| file_path)
-                .cloned()
                 .collect_vec();
             return Err(RedemptionValidationError::InvalidClaims(
                 file_names_of_invalid_claims,
