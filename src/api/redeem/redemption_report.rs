@@ -25,6 +25,8 @@ pub enum RedemptionReportDisplayFormat {
     #[default]
     Readable,
     Detailed,
+    ColonSeparated,
+    ColonSeparatedTestnet,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -58,6 +60,10 @@ impl RedemptionReportEntry {
         let release_date_width = match format {
             RedemptionReportDisplayFormat::Readable => Timestamp::now().standard_format().len(),
             RedemptionReportDisplayFormat::Detailed => BFieldElement::MAX.to_string().len(),
+            RedemptionReportDisplayFormat::ColonSeparated
+            | RedemptionReportDisplayFormat::ColonSeparatedTestnet => {
+                BFieldElement::MAX.to_string().len()
+            }
         };
         let random_address = GenerationReceivingAddress::derive_from_seed(rng().random());
         let network = Network::Main;
@@ -67,6 +73,10 @@ impl RedemptionReportEntry {
                 .unwrap()
                 .len(),
             RedemptionReportDisplayFormat::Detailed => {
+                random_address.to_bech32m(network).unwrap().len()
+            }
+            RedemptionReportDisplayFormat::ColonSeparated
+            | RedemptionReportDisplayFormat::ColonSeparatedTestnet => {
                 random_address.to_bech32m(network).unwrap().len()
             }
         };
@@ -86,6 +96,10 @@ impl RedemptionReportEntry {
         let amount = match format {
             RedemptionReportDisplayFormat::Readable => self.amount.display_lossless(),
             RedemptionReportDisplayFormat::Detailed => self.amount.to_nau().to_string(),
+            RedemptionReportDisplayFormat::ColonSeparated
+            | RedemptionReportDisplayFormat::ColonSeparatedTestnet => {
+                self.amount.display_lossless()
+            }
         };
 
         let amount_padded = format!("{:>width$}", amount, width = column_widths[0]);
@@ -94,6 +108,11 @@ impl RedemptionReportEntry {
             (_, None) => "-".to_string(),
             (RedemptionReportDisplayFormat::Readable, Some(rd)) => rd.standard_format(),
             (RedemptionReportDisplayFormat::Detailed, Some(rd)) => rd.to_millis().to_string(),
+            (
+                RedemptionReportDisplayFormat::ColonSeparated
+                | RedemptionReportDisplayFormat::ColonSeparatedTestnet,
+                Some(rd),
+            ) => rd.to_millis().to_string(),
         };
         let earliest_release_date_padded =
             format!("{:width$}", earliest_release_date, width = column_widths[1]);
@@ -104,6 +123,12 @@ impl RedemptionReportEntry {
                 self.address.to_bech32m_abbreviated(network).unwrap()
             }
             RedemptionReportDisplayFormat::Detailed => self.address.to_bech32m(network).unwrap(),
+            RedemptionReportDisplayFormat::ColonSeparated => {
+                self.address.to_bech32m(network).unwrap()
+            }
+            RedemptionReportDisplayFormat::ColonSeparatedTestnet => {
+                self.address.to_bech32m(Network::Testnet).unwrap()
+            }
         };
         let address_padded = format!("{:width$}", address, width = column_widths[2]);
 
@@ -120,6 +145,14 @@ impl RedemptionReportEntry {
                     amount_padded, earliest_release_date_padded, address_padded
                 )
             }
+            RedemptionReportDisplayFormat::ColonSeparated
+            | RedemptionReportDisplayFormat::ColonSeparatedTestnet => {
+                if let Some(release_date) = self.earliest_release_date {
+                    format!("{}:{}:{}\n", address, amount, release_date.to_millis())
+                } else {
+                    format!("{}:{}\n", address, amount)
+                }
+            }
         }
     }
 }
@@ -127,7 +160,7 @@ impl RedemptionReportEntry {
 impl Distribution<RedemptionReportEntry> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> RedemptionReportEntry {
         let amount = NativeCurrencyAmount::from_nau(
-            rng.random_range(0_i128..NativeCurrencyAmount::max().to_nau()),
+            rng.random_range(0_i128..NativeCurrencyAmount::max().to_nau()) >> 5,
         );
         let earliest_release_date = if rng.random_bool(0.5_f64) {
             None
@@ -246,6 +279,8 @@ impl RedemptionReport {
                 width1 = column_widths[1],
                 width2 = column_widths[2],
             ),
+            RedemptionReportDisplayFormat::ColonSeparated
+            | RedemptionReportDisplayFormat::ColonSeparatedTestnet => "".to_string(),
         }
     }
 
@@ -279,6 +314,8 @@ impl RedemptionReport {
                 )
             }
             RedemptionReportDisplayFormat::Detailed => "".to_string(),
+            RedemptionReportDisplayFormat::ColonSeparated
+            | RedemptionReportDisplayFormat::ColonSeparatedTestnet => "".to_string(),
         }
     }
 
@@ -315,10 +352,12 @@ mod test {
     fn can_render_random_report() {
         let mut rng = rng();
         let report = rng.random::<RedemptionReport>();
-        let format = if rng.random_bool(0.5_f64) {
-            RedemptionReportDisplayFormat::Readable
-        } else {
-            RedemptionReportDisplayFormat::Detailed
+        let format = match rng.random_range(0..4) {
+            0 => RedemptionReportDisplayFormat::Readable,
+            1 => RedemptionReportDisplayFormat::Detailed,
+            2 => RedemptionReportDisplayFormat::ColonSeparated,
+            3 => RedemptionReportDisplayFormat::ColonSeparatedTestnet,
+            _ => panic!("rng error"),
         };
         println!("{}", report.render(format)); // no crash
     }
