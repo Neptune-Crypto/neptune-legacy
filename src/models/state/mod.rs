@@ -1632,6 +1632,7 @@ impl GlobalState {
         }
 
         // Read the block.
+        info!("reading block");
         let block = self
             .chain
             .archival_state()
@@ -1645,10 +1646,12 @@ impl GlobalState {
         }
 
         // Set light state to this block.
+        info!("setting light state");
         *self.chain.light_state_mut() = Arc::new(block.clone());
 
         // Mark block as tip in block index database. In case we crash while
         // frozen, we want to leave the database in a recoverable state.
+        info!("setting tip in block database");
         self.chain
             .archival_state_mut()
             .write_block_as_tip(&block)
@@ -1656,12 +1659,14 @@ impl GlobalState {
             .expect("block was stored, so must be valid; also, disk IO is assumed to work");
 
         // Update archival block MMR.
+        info!("setting tip in archival block MMR");
         self.chain
             .archival_state_mut()
             .append_to_archival_block_mmr(&block)
             .await;
 
         // Update archival Mutator Set.
+        info!("setting archival mutator set");
         self.chain
             .archival_state_mut()
             .update_mutator_set(&block)
@@ -1674,9 +1679,11 @@ impl GlobalState {
         // need to dig into the archival mutator set to find the membership
         // proofs. The reason why that's okay is because the node is already
         // verified to be archival.
+        info!("restoring monitored UTXOs from archival mutator set");
         self.restore_monitored_utxos_from_archival_mutator_set()
             .await;
 
+        info!("done setting tip");
         Ok(())
     }
 

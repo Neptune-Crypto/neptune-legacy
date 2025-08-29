@@ -2282,13 +2282,13 @@ impl NeptuneRPCServer {
             .await
             .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
 
-        // Set tip.
-        self.state
-            .lock_guard_mut()
+        // Set tip asynchronously -- avoid RPC timeout.
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::SetTipToStoredBlock(indicated_tip))
             .await
-            .set_tip_to_stored_block(indicated_tip)
-            .await
-            .map_err(|e| RpcError::Failed(format!("failed to set tip to stored block: {e}")))
+            .map_err(|e| RpcError::Failed(format!("could not send message to main loop: {e}")))?;
+
+        Ok(())
     }
 }
 

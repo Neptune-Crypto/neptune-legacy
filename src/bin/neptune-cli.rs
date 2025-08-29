@@ -1448,7 +1448,7 @@ async fn main() -> Result<()> {
             println!("Setting tip ...");
             match client.set_tip(ctx, token, digest.0).await? {
                 Ok(_) => {
-                    println!("success.");
+                    println!("Started setting tip. (May take a while.)");
                 }
                 Err(server_error) => {
                     println!("failed to set tip: {server_error}");

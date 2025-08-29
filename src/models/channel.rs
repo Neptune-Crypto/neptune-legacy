@@ -216,4 +216,5 @@ pub enum RPCServerToMain {
     RestartMiner,
     Freeze,
     Unfreeze,
+    SetTipToStoredBlock(Digest),
 }
