@@ -248,12 +248,14 @@ impl Redeemer {
             .map(|cs| usize::max(cs, minimum_chunk_size))
             .unwrap_or(default_chunk_size);
         for tx_inputs in all_tx_inputs.chunks(chunk_size) {
+            tracing::info!("processing batch of {} inputs", tx_inputs.len());
             // Determine time-locked amount.
             let timelocked_amount = tx_inputs
                 .iter()
                 .filter(|txinput| txinput.utxo.release_date().is_some())
                 .map(|txinput| txinput.utxo.get_native_currency_amount())
                 .sum::<NativeCurrencyAmount>();
+            tracing::info!("timelocked amount: {}", timelocked_amount);
 
             // Determine liquid amount.
             let liquid_amount = tx_inputs
@@ -261,12 +263,19 @@ impl Redeemer {
                 .filter(|txinput| txinput.utxo.release_date().is_none())
                 .map(|txinput| txinput.utxo.get_native_currency_amount())
                 .sum::<NativeCurrencyAmount>();
+            tracing::info!("liquid amount: {}", liquid_amount);
 
             // Determine release date: earliest of all time-locks (if any).
             let earliest_release_date = tx_inputs
                 .iter()
                 .filter_map(|tx_input| tx_input.utxo.release_date())
                 .min();
+            tracing::info!(
+                "earliest release date: {}",
+                earliest_release_date
+                    .map(|ts| ts.standard_format())
+                    .unwrap_or("-".to_string())
+            );
 
             // Determine recipient address.
             let recipient = destination_address.unwrap_or_else(|| {

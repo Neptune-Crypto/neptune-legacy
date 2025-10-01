@@ -168,7 +168,10 @@ impl TransactionDetailsBuilder {
             .total_native_coins()
             .checked_add(&fee)
             .ok_or(CreateTxError::TotalSpendTooLarge)?;
+        tracing::info!("total outbound amount: {}", total_outbound_amount);
+        tracing::info!("fee: {}", fee);
         let total_unlocked_amount = tx_inputs.total_native_coins();
+        tracing::info!("total unlocked amount: {}", total_unlocked_amount);
 
         // ##multicoin## : do we need a change amount for each Coin?
         let change_amount = total_unlocked_amount
