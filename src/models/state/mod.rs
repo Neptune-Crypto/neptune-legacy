@@ -2048,8 +2048,12 @@ impl GlobalState {
         let block_file_paths = ArchivalState::read_block_file_names_from_directory(directory)?;
         let mut num_stored_blocks = 0;
         let mut predecessor = self.chain.light_state().clone();
+
+        debug!("iterating over all block files ...");
         for block_file_path in block_file_paths {
+            debug!("now working on block file '{:?}' ...", block_file_path);
             let blocks = ArchivalState::blocks_from_file_without_record(&block_file_path).await?;
+            debug!("got blocks!");
 
             // Blocks are assumed to be stored in-order in the file.
             for block in blocks {

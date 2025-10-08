@@ -1973,7 +1973,8 @@ impl MainLoopHandler {
             }
             RPCServerToMain::SetTipToStoredBlock(digest) => {
                 info!("setting tip to {digest:x}");
-                self.global_state_lock()
+                let _ = self
+                    .global_state_lock()
                     .lock_guard_mut()
                     .await
                     .set_tip_to_stored_block(digest)
