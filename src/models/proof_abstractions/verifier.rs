@@ -1,5 +1,8 @@
 use tasm_lib::triton_vm;
+use tasm_lib::triton_vm::arithmetic_domain::ArithmeticDomain;
 use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::triton_vm::proof_item::ProofItem;
+use tasm_lib::triton_vm::proof_stream::ProofStream;
 use tasm_lib::triton_vm::stark::Stark;
 use tokio::task;
 
@@ -59,11 +62,35 @@ pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool
     }
 
     let claim_clone = claim.clone();
+    let proof_clone = proof.clone().into();
     let verdict = task::spawn_blocking(move || {
-        triton_vm::verify(Stark::default(), &claim_clone, &proof.into())
+        triton_vm::verify(Stark::default(), &claim_clone, &proof_clone)
     })
     .await
     .expect("should be able to verify proof in new tokio task");
+
+    let proof_stream = ProofStream::try_from(&proof.into()).expect("proof is valid");
+    let mut interpolated_polynomial = None;
+    for proof_item in proof_stream.items {
+        match proof_item {
+            ProofItem::FriCodeword(codeword) => {
+                interpolated_polynomial = Some(
+                    ArithmeticDomain::of_length(codeword.len())
+                        .unwrap()
+                        .interpolate(&codeword),
+                );
+            }
+            ProofItem::FriPolynomial(polynomial) => {
+                let interpolant = interpolated_polynomial
+                    .clone()
+                    .expect("fri codeword comes first; then polynomial");
+                if interpolant != polynomial {
+                    return false;
+                }
+            }
+            _ => continue,
+        }
+    }
 
     // tbd: we might want to enable a cache for mainnet usage.
     // but we should probably use a cache that has a configurable max
